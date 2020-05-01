@@ -46,16 +46,42 @@ sub main {
 		}
 		close $fh;
 		my @apps = get_apt($contents);
+		my @pip = get_pip($contents);
 
 		foreach my $ta (@apps) {
 			my $exists = package_exists($ta);
 			if($exists == 0) {
-				red $ta;
+				red "apt: $ta";
+			}
+		}
+
+		foreach my $pa (@pip) {
+			my $exists = pip_package_exists($pa);
+			if($exists == 0) {
+				red "pip3: $pa";
 			}
 		}
 	} else {
 		die "$options{recipe_file} not found";
 	}
+}
+
+sub get_pip {
+	my $contents = shift;
+	my @pip = ();
+
+	$contents =~ s#.*%post##gis;
+	$contents =~ s#%environment.*##gis;
+	$contents =~ s#\s+\\\s*[\n\r]##gis;
+	foreach my $line (split(/\R/, $contents)) {
+		if($line =~ m#pip3 install (.*)#) {
+			my $install = $1;
+			if($install !~ /^--/ && $install !~ /^-/) {
+				push @pip, grep { m#.# } split(/\s+/, $install);
+			}
+		}
+	}
+	return @pip;
 }
 
 sub get_apt {
@@ -74,11 +100,48 @@ sub get_apt {
 	return @apps;
 }
 
+sub pip_package_exists {
+	my $package = shift;
+	debug "pip_package_exists($package)";
+
+
+	my $cache_file = "./cache/pip_".md5_hex($package);
+	my $returns = 0;
+	if(-e $cache_file) {
+		#print "$cache_file\n";
+		my $contents = '';
+		open my $fh, '<', $cache_file or die $!;
+		while (<$fh>) {
+			$contents .= $_;
+		}
+		close $fh;
+		$returns = $contents;
+		chomp $returns;
+	} else {
+		my $command = "pip3 search $package";
+		my $output = qx($command);
+		my $retval = $?;
+
+		my $exists = 0;
+
+		if($retval == 0) {
+			$exists = 1;
+		} else {
+			$exists = 0;
+		}
+
+		open my $fh, '>', $cache_file or die $!;
+		print $fh $exists;
+		close $fh;
+		$returns = $exists;
+	}
+
+	return $returns;
+}
+
 sub package_exists {
 	my $package = shift;
 	debug "package_exists($package)";
-	# https://packages.ubuntu.com/de/bionic/ppc64el/sox/download
-	# https://packages.ubuntu.com/de/bionic/sox
 	my $site = get_server().'/'.$package.'/download';
 	my $page = myget($site);
 
